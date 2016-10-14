@@ -3,12 +3,12 @@ package ru.v0rt3x.vindicator.agent.types;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.pcap4j.core.NotOpenException;
-import org.pcap4j.core.PacketListener;
 import org.pcap4j.core.PcapHandle;
 import org.pcap4j.core.PcapNativeException;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
+
 import ru.v0rt3x.vindicator.agent.AgentTask;
 import ru.v0rt3x.vindicator.agent.AgentType;
 import ru.v0rt3x.vindicator.agent.AgentTypeInfo;
@@ -45,6 +45,8 @@ public class MonitorAgent implements AgentType {
                         Integer srcPort = packet.get(TcpPacket.class).getHeader().getSrcPort().valueAsInt();
                         Integer dstPort = packet.get(TcpPacket.class).getHeader().getDstPort().valueAsInt();
 
+                        Long sequenceId = packet.get(TcpPacket.class).getHeader().getSequenceNumberAsLong();
+
                         List<Long> servicePorts = ((List<JSONObject>) task.data().get("service")).stream()
                             .map(service -> (Long) service.get("port"))
                             .collect(Collectors.toList());
@@ -60,30 +62,37 @@ public class MonitorAgent implements AgentType {
                                     )
                                 ).get("name");
 
-                                logger.info(String.format(
-                                    "Service<%s:%d>(%s): SRC[%s:%d] -> DST[%s:%d]",
-                                    tgtHost, tgtPort, tgtName, srcHost, srcPort, dstHost, dstPort
-                                ));
+                                if (srcIsTarget) {
+                                    logger.info(String.format(
+                                        "Service<%s:%d>(%s): --{%s}-> DST[%s:%d]",
+                                        tgtHost, tgtPort, tgtName, sequenceId, dstHost, dstPort
+                                    ));
+                                } else {
+                                    logger.info(String.format(
+                                        "Service<%s:%d>(%s): <-{%s}-- SRC[%s:%d]",
+                                        tgtHost, tgtPort, tgtName, sequenceId, srcHost, srcPort
+                                    ));
+                                }
 
                                 logPacket(packet, tgtName, dstIsTarget);
                             }
                         }
                     }
                 } catch (TimeoutException e) {
-                    e.printStackTrace();
+                    logger.error("Handle reached timeout. Re-opening handle.");
                 } catch (EOFException e) {
-                    e.printStackTrace();
+                    logger.error("Unexpected EOF. Re-opening handle.");
                 }
 
                 pCap.close();
             }
 
         } catch (PcapNativeException e) {
-            e.printStackTrace();
+            logger.error("PCAPError: [{}] {}", e.getClass().getSimpleName(), e.getMessage());
         } catch (NotOpenException e) {
-            e.printStackTrace();
+            logger.error("Unable to listen on closed handle: {}", e.getMessage());
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("Unexpected error: [{}]: {}", e.getClass().getSimpleName(), e.getMessage());
         }
     }
 
@@ -108,10 +117,13 @@ public class MonitorAgent implements AgentType {
         client.put("host", (direction ? ipV4Header.getSrcAddr() : ipV4Header.getDstAddr()).getHostAddress());
         client.put("port", (direction ? tcpHeader.getSrcPort() : tcpHeader.getDstPort()).valueAsInt());
 
+        Long sequenceId = tcpHeader.getSequenceNumberAsLong();
+
         request.put("action", "monitor");
         request.put("service", service);
         request.put("direction", direction);
         request.put("client", client);
+        request.put("sequenceId", sequenceId);
         request.put("time", System.currentTimeMillis());
 
         Packet payload = packet.get(TcpPacket.class).getPayload();

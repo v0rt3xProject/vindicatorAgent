@@ -143,7 +143,9 @@ public class VindicatorAgent {
         }
 
         while (isRunning) {
-            update();
+            if (agentID != null) {
+                update();
+            }
 
             Thread.sleep(config.getLong("vindicator.agent.update_interval", 2000L));
         }
@@ -232,6 +234,8 @@ public class VindicatorAgent {
                         executeThread(new AgentTaskExecutor(task));
                     }
                 }
+                break;
+            case "monitor":
                 break;
             default:
                 logger.info("Unknown action: {}", action);
